@@ -1,6 +1,3 @@
-Here's the complete README content formatted as Markdown for your Django REST API project. You can copy and paste this into your `README.md` file:
-
-```markdown
 # Django REST API Project
 
 ## Overview
