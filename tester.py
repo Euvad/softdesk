@@ -28,7 +28,8 @@ TEST_ISSUE = {
     "description": "Issue description",
     "tag": "BUG",
     "priority": "HIGH",
-    "status": "TODO"
+    "status": "TODO",
+    "assignee": None  # We'll set this later
 }
 
 TEST_COMMENT = {
@@ -44,15 +45,19 @@ def print_result(test_name, response, success):
         print(f"{Fore.YELLOW}Status Code: {response.status_code}")
         print(f"{Fore.YELLOW}Response: {response.text}")
 
-# Test creating a user
+# Test creating a user and return its ID
 def test_create_user():
     url = BASE_URL + "users/"
     response = requests.post(url, json=TEST_USER)
-    if response.status_code == 400 and "username" in response.json():
+    if response.status_code == 201:
+        user_id = response.json().get('id')
+        print_result("Create User", response, True)
+        return user_id
+    elif response.status_code == 400 and "username" in response.json():
         print(f"{Fore.YELLOW}User already exists, proceeding with existing user.")
-        return True
-    print_result("Create User", response, response.status_code == 201)
-    return response.status_code == 201
+        return None  # In this case, you might want to get the user ID manually
+    print_result("Create User", response, False)
+    return None
 
 # Test obtaining a JWT token
 def test_obtain_token():
@@ -95,40 +100,47 @@ def test_get_existing_project_id(token):
             return projects[0]["id"]  # Return the first project's ID if available
     return None
 
-# Test creating an issue
+# Test adding the user as a contributor to the project (without role)
+def test_add_contributor(token, project_id, user_id):
+    url = f"{BASE_URL}projects/{project_id}/contributors/"
+    headers = {"Authorization": f"Bearer {token}"}
+    contributor_data = {
+        "user": user_id,
+        "role": "CONTRIBUTOR"  # Adjust as necessary
+    }
+    response = requests.post(url, json=contributor_data, headers=headers)
+    print_result("Add Contributor", response, response.status_code == 201)
+    return response.status_code == 201
+
+# Test creating an issue and directly return its ID
 def test_create_issue(token, project_id):
-    url = BASE_URL + "issues/"
+    url = f"{BASE_URL}projects/{project_id}/issues/"
     headers = {"Authorization": f"Bearer {token}"}
     issue_data = TEST_ISSUE.copy()
-    issue_data["project"] = project_id
     issue_data["assignee"] = 1  # Assuming user ID 1 exists; adjust if necessary
     response = requests.post(url, json=issue_data, headers=headers)
+    
     print_result("Create Issue", response, response.status_code == 201)
+    
     if response.status_code == 201:
-        return response.json().get("id")
+        issue_id = response.json().get('id')  # Get the ID of the created issue
+        return issue_id
     else:
-        # Log error if issue creation fails
         print(f"Create Issue - FAIL: {response.text}")
-        return test_get_existing_issue_id(token)
+        return None
 
-# Get an existing issue ID if creation fails
-def test_get_existing_issue_id(token):
-    url = BASE_URL + "issues/"
+# Test listing issues for a project
+def test_list_issues_for_project(token, project_id):
+    url = f"{BASE_URL}projects/{project_id}/issues/"
     headers = {"Authorization": f"Bearer {token}"}
     response = requests.get(url, headers=headers)
-    print_result("List Issues", response, response.status_code == 200)
-    if response.status_code == 200:
-        issues = response.json()
-        if issues:
-            return issues[0]["id"]  # Return the first issue's ID if available
-    return None
+    print_result(f"List Issues for Project {project_id}", response, response.status_code == 200)
 
 # Test creating a comment
-def test_create_comment(token, issue_id):
-    url = BASE_URL + "comments/"
+def test_create_comment(token, project_id, issue_id):
+    url = f"{BASE_URL}projects/{project_id}/issues/{issue_id}/comments/"
     headers = {"Authorization": f"Bearer {token}"}
     comment_data = TEST_COMMENT.copy()
-    comment_data["issue"] = issue_id
     response = requests.post(url, json=comment_data, headers=headers)
     print_result("Create Comment", response, response.status_code == 201)
     if response.status_code == 201:
@@ -136,15 +148,64 @@ def test_create_comment(token, issue_id):
     else:
         # Log error if comment creation fails
         print(f"Create Comment - FAIL: {response.text}")
+        return None
+
+# Test listing comments for an issue
+def test_list_comments_for_issue(token, project_id, issue_id):
+    url = f"{BASE_URL}projects/{project_id}/issues/{issue_id}/comments/"
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.get(url, headers=headers)
+    print_result(f"List Comments for Issue {issue_id}", response, response.status_code == 200)
+
+# Test editing an issue without being the author
+def test_edit_issue(token, project_id, issue_id):
+    url = f"{BASE_URL}projects/{project_id}/issues/{issue_id}/"
+    headers = {"Authorization": f"Bearer {token}"}
+    updated_data = {
+        "title": "Updated Issue Title",
+        "description": "Updated description",
+        "tag": "FEATURE",
+        "priority": "MEDIUM",
+        "status": "IN_PROGRESS",
+        "assignee": 1  # Adjust as necessary
+    }
+    response = requests.put(url, json=updated_data, headers=headers)
+    print_result("Edit Issue (non-author)", response, response.status_code == 403)  # Should fail
+
+# Test deleting an issue without being the author
+def test_delete_issue(token, project_id, issue_id):
+    url = f"{BASE_URL}projects/{project_id}/issues/{issue_id}/"
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.delete(url, headers=headers)
+    print_result("Delete Issue (non-author)", response, response.status_code == 403)  # Should fail
+
+# Test editing a comment without being the author
+def test_edit_comment(token, project_id, issue_id, comment_id):
+    url = f"{BASE_URL}projects/{project_id}/issues/{issue_id}/comments/{comment_id}/"
+    headers = {"Authorization": f"Bearer {token}"}
+    updated_data = {
+        "description": "Updated comment description"
+    }
+    response = requests.put(url, json=updated_data, headers=headers)
+    print_result("Edit Comment (non-author)", response, response.status_code == 403)  # Should fail
+
+# Test deleting a comment without being the author
+def test_delete_comment(token, project_id, issue_id, comment_id):
+    url = f"{BASE_URL}projects/{project_id}/issues/{issue_id}/comments/{comment_id}/"
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.delete(url, headers=headers)
+    print_result("Delete Comment (non-author)", response, response.status_code == 403)  # Should fail
 
 # Main function to run all tests
 def run_tests():
     # Prompt for username input
     TEST_USER["username"] = input("Enter a username for testing: ")
 
-    if not test_create_user():
-        print("Exiting due to user creation failure.")
+    user_id = test_create_user()
+    if user_id is None:
+        print("User creation failed or user already exists.")
         return
+
     token = test_obtain_token()
     if token:
         test_list_users(token)
@@ -152,11 +213,32 @@ def run_tests():
         # Test project operations
         project_id = test_create_project(token)
         if project_id:
-            # Test issue operations
-            issue_id = test_create_issue(token, project_id)
-            if issue_id:
-                # Test comment operations
-                test_create_comment(token, issue_id)
+            # Add the user as a contributor to the project
+            if test_add_contributor(token, project_id, user_id):
+                # Test issue operations
+                issue_id = test_create_issue(token, project_id)
+                if issue_id:
+                    # Test comment operations
+                    comment_id = test_create_comment(token, project_id, issue_id)
+
+                    # Test editing and deleting issue and comment without being the author
+                    if issue_id:
+                        test_edit_issue(token, project_id, issue_id)
+                        test_delete_issue(token, project_id, issue_id)
+                    
+                    if comment_id:
+                        test_edit_comment(token, project_id, issue_id, comment_id)
+                        test_delete_comment(token, project_id, issue_id, comment_id)
+
+                    # Test listing issues for the project
+                    test_list_issues_for_project(token, project_id)
+
+                    # Test listing comments for the issue
+                    test_list_comments_for_issue(token, project_id, issue_id)
+            else:
+                print("Failed to add contributor to the project.")
+        else:
+            print("Project creation failed.")
 
 if __name__ == "__main__":
     run_tests()

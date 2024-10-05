@@ -1,10 +1,10 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, serializers
+from rest_framework.permissions import AllowAny
 from .models import CustomUser
 from .serializers import UserSerializer
-from rest_framework.permissions import AllowAny
-from rest_framework import serializers
+
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = CustomUser.objects.all()
+    queryset = CustomUser.objects.all().order_by('username')  # Ordre alphabétique par nom d'utilisateur
     serializer_class = UserSerializer
 
     # Allow any user to create accounts, restrict other operations
